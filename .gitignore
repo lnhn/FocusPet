@@ -1,0 +1,6 @@
+.build/
+.DS_Store
+*.xcodeproj
+xcuserdata/
+教程/pdf-qa*/
+PetAssets.zip

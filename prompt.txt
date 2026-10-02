@@ -1,0 +1,83 @@
+帮我用 C# + WPF (.NET 8) 开发一个 Windows 桌面宠物番茄钟应用「FocusPet」。
+这是一个已有的 macOS 应用的移植版，功能 1:1 对齐，请输出完整可运行的项目
+（.csproj + 各文件代码 + 目录结构）。
+
+【项目设置】
+- dotnet new wpf 建项目，TargetFramework=net8.0-windows，UseWPF=true
+- 宠物动画素材：PetAssets 文件夹 128 张 PNG 序列帧（内容属性复制到输出目录），
+  猫用前缀 idle/walk/run/sleep/focus/celebrate/wave/sad，狗加 dog_ 前缀，
+  每套 8 帧（前缀_1.png ~ 前缀_8.png），透明背景、统一裁剪框对齐，直接加载即可
+
+【主窗口（宠物）】
+- WindowStyle=None, AllowsTransparency=true, Background=Transparent,
+  Topmost=true, ShowInTaskbar=false, SizeToContent=Manual
+- 内容：Canvas + Image 控件显示当前帧，用 DispatcherTimer（间隔 ~15ms）
+  按每套动画的帧时长推进帧序号；BitmapImage 按前缀缓存，禁止每帧读文件
+- 倒计时气泡：Canvas 上自绘圆角 Rectangle + TextBlock（等宽数字字体），
+  专注时显示在宠物头顶
+- 拖拽：MouseDown 里调用 this.DragMove()（系统级拖拽，必须跟手零延迟，
+  不要自己累加 MouseMove 偏移）
+- 抓起（MouseDown 时）：播 wave 动画（循环）；松手（MouseUp）：做一个小弹跳
+  （ScaleTransform 动画）回 idle；会话中抓起则不切动画，松手回 focus/sleep
+- 双击（Click 事件或 MouseDown 判 e.ClickCount==2）：播 celebrate 动画，
+  同时在 Canvas 上生成 6 个 ❤️🧡💖 等 emoji TextBlock，用 DispatcherTimer
+  驱动上升+摇摆+淡出（1.8 秒生命周期）
+- 右键宠物弹出 ContextMenu（与托盘菜单共用构建逻辑）
+
+【宠物行为调度（PetController 类）】
+- 空闲时每 5~12 秒随机触发：散步 50% / 挥手 20% / 睡觉 20% / 不动 10%
+- 散步：目标点为水平方向 260~680px 内的随机点（垂直偏移 ±60px），
+  用 DispatcherTimer 16ms  tick 做 ease-in-out 插值移动（
+  raw<0.5 ? 2t² : 1-(-2t+2)²/2），猫步速 55~95 px/s、帧时长 0.6s、
+  弧线偏移 min(14, dist*0.05)；狗步速 130~190 px/s、帧时长 0.26s、
+  弧线 min(60, dist*0.16) 模拟蹦跳；单次最长 20 秒，素材脸朝左，
+  向右移动时 ScaleTransform(-1,1) 水平翻转
+- 乱窜：每 12~30 秒一次，快速跑向屏幕可见区域内随机点，550~900 px/s，
+  弧线 min(110, dist*0.18)，距离 >80px 才触发
+- 移动中如果被拖拽打断则取消；会话期间暂停所有自由行为
+
+【番茄钟引擎（FocusEngine 类）】
+- 25/5/15 分钟循环（可设置），每 N 轮长休；状态机 idle/running/paused，
+  事件回调 onSessionStart/onSessionComplete/onTick/onPhaseChange
+- 专注结束仪式感：系统提示音 + 托盘气泡通知 + 宠物【跑到屏幕水平居中、
+  偏下 28% 位置】（run 动画 + 移动，最多 2.5 秒），落地弹跳后播 celebrate，
+  播完自动进入休息
+- 休息结束通知；中途放弃时宠物播 sad 动画
+- 全局热键 Ctrl+Shift+P：RegisterHotKey (user32.dll P/Invoke)，开始/暂停/继续
+
+【托盘】
+- 用 WinForms NotifyIcon（System.Windows.Forms + System.Drawing 引用），
+  图标可从 emoji 画到 Bitmap 生成
+- 菜单项：开始/暂停/继续专注、猫咪 🐱·名字 / 狗狗 🐶·名字（单选）、
+  专注统计、设置、显示/隐藏宠物、关于、退出
+
+【设置窗口（WPF）】
+- 番茄钟：专注/短休/长休时长 Stepper、循环轮数
+- 桌面宠物：猫/狗切换、大小滑杆 50%~150%（窗口以中心为锚缩放，即时生效）、
+  登录自启（注册表 HKCU\Software\Microsoft\Windows\CurrentVersion\Run）
+- 🐾 宠物资料：名字（猫狗各自独立）、生日 DatePicker（开启后才可选，
+  显示自动算出的星座）、相遇纪念日（默认今天，显示相伴 N 天）
+- 🙋 主人资料：生日 → 星座；双方生日都填后显示星座匹配度
+  （12×12 配对表：同象 90 分起、火风/土水相生 94 起、相邻 76 起、
+  火水/土风 58 起，加 (a*7+b*13)%11-5 确定性微调，评语按分数段：
+  ≥90 天生一对 / ≥80 越处越合拍 / ≥70 稳稳的幸福 / ≥60 性格互补 / 否则欢喜冤家）
+- 所有设置存 JSON（%APPDATA%\FocusPet\settings.json），即时生效
+
+【统计窗口】
+- 宠物名片（名字、星座 emoji+名称、相伴 N 天💞）+ 今日次数/今日分钟/
+  连续天数/近7天分钟/累计分钟 + 近 7 天柱状图
+- 记录存 %APPDATA%\FocusPet\sessions.json（开始时间、结束时间、计划时长、
+  是否完成、类型 focus/shortRest/longRest）
+
+【关键技术坑（必须遵守）】
+1. 帧 BitmapImage 必须 DecodePixelWidth 提前解码并缓存，避免 GC 压力
+2. 透明窗口的 Image 不要加 DropShadowEffect（残影）
+3. 帧切换如果做 crossfade，Opacity 动画必须 <0.1 秒完成
+4. 定时器用 DispatcherTimer（UI 线程），移动动画 16ms 间隔
+5. 通知先用 NotifyIcon.ShowBalloonTip（简单可靠）；注释里说明换 Toast 通知
+   需要 AUMID 快捷方式
+
+【打包与开机自启】
+- 给出 dotnet publish -c Release -r win-x64 --self-contained 的完整命令，
+  产出单目录独立 exe（含运行时，目标机器零依赖）
+- 说明自启方式：Win+R → shell:startup → 拖快捷方式（用户级，无需管理员）
